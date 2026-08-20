@@ -175,7 +175,8 @@
     field("phone", p.phone, "tel:" + p.phone.replace(/[^+\d]/g, ""));
     field("email", p.email, "mailto:" + p.email);
     field("artstation", "ArtStation ↗", p.portfolio && p.portfolio.url);
-    field("linkedin", "LinkedIn ↗", linkedin && linkedin.url);
+    const linkedinUrl = linkedin ? linkedin.url : "https://www.linkedin.com/in/zulfekarahmad15/";
+    field("linkedin", "LinkedIn ↗", linkedinUrl);
     field("resume", "Resume (PDF)", p.resume);
   }
 

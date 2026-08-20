@@ -395,7 +395,7 @@ main {
 
 .work-card:hover {
   box-shadow: 0 14px 32px var(--shadow);
-  transform: translateY(-2px);
+  transform: translateY(-2px) scale(1.5);
 }
 
 .work-fig {
@@ -510,7 +510,7 @@ main {
 
 .live-card:hover {
   box-shadow: 0 14px 32px var(--shadow);
-  transform: translateY(-2px);
+  transform: translateY(-2px) scale(1.03);
 }
 
 .live-meta {

@@ -9,6 +9,8 @@ import {
   deleteFile,
   repoPathFromUrl,
   rawUrl,
+  setToken,
+  verifyToken
 } from "./github.js";
 import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
 
@@ -18,6 +20,7 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
   const ADMIN_USER = "zulfi";
   const ADMIN_PASS = "zulfi";
   const AUTH_KEY = "zulf-admin-auth";
+  const GH_TOKEN_KEY = "zulf-gh-token";
 
   const $ = (sel) => document.querySelector(sel);
 
@@ -27,6 +30,7 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
   let models = [];
   let editingIndex = -1;
   let pendingFile = null;
+  let uploadPromise = null;
 
   const isAuthed = () => {
     try {
@@ -112,7 +116,10 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
     if (!model) return;
     if (!confirm('Delete "' + model.title + '"? The model file and its entry will be removed from GitHub.')) return;
 
-    const repoPath = repoPathFromUrl(cfg, model.file);
+    let repoPath = repoPathFromUrl(cfg, model.file);
+    if (!repoPath && model.file && model.file.indexOf(cfg.modelsDir) === 0) {
+      repoPath = model.file;
+    }
     if (repoPath && hasToken()) {
       try {
         const deleted = await deleteFile(cfg, repoPath);
@@ -130,28 +137,36 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
     const name = sanitize(file.name);
     const base64 = await fileToBase64(file);
 
-    if (hasToken()) {
-      try {
-        const repoPath = cfg.modelsDir + "/" + name;
-        const url = await putFileBinary(cfg, repoPath, base64);
-        pendingFile = { path: url };
-        $("#file-path-note").textContent = "Uploaded — path: " + url;
-        return;
-      } catch (err) {
-        console.error("GitHub upload failed:", err);
-        flash("GitHub upload failed: " + err.message, true);
+    uploadPromise = (async () => {
+      if (hasToken()) {
+        try {
+          const repoPath = cfg.modelsDir + "/" + name;
+          const path = await putFileBinary(cfg, repoPath, base64);
+          pendingFile = { path };
+          $("#file-path-note").textContent = "Uploaded — path: " + path;
+          return;
+        } catch (err) {
+          console.error("GitHub upload failed:", err);
+          flash("GitHub upload failed: " + err.message, true);
+        }
+      } else {
+        $("#file-path-note").textContent =
+          "GitHub upload unavailable — the model is stored in this browser only.";
       }
-    } else {
-      $("#file-path-note").textContent =
-        "GitHub upload unavailable — the model is stored in this browser only.";
-    }
 
-    const blobId = "model-" + Date.now() + "-" + name;
-    await idbPut(blobId, file);
-    const autoPath = rawUrl(cfg, cfg.modelsDir + "/" + name);
-    pendingFile = { blobId, path: autoPath };
-    $("#file-path-note").textContent =
-      "GitHub upload failed — stored in this browser for now.";
+      const blobId = "model-" + Date.now() + "-" + name;
+      await idbPut(blobId, file);
+      const autoPath = rawUrl(cfg, cfg.modelsDir + "/" + name);
+      pendingFile = { blobId, path: autoPath };
+      $("#file-path-note").textContent =
+        "GitHub upload failed — stored in this browser for now.";
+    })();
+
+    try {
+      await uploadPromise;
+    } finally {
+      uploadPromise = null;
+    }
   }
 
   function stripBlob(models) {
@@ -188,7 +203,7 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
     renderList();
   }
 
-  function submitForm(e) {
+  async function submitForm(e) {
     e.preventDefault();
     const entry = {
       title: $("#f-title").value.trim(),
@@ -196,6 +211,19 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
       description: $("#f-desc").value.trim(),
     };
     if (!entry.title) return;
+
+    if (uploadPromise) {
+      const btn = $("#form-submit");
+      btn.disabled = true;
+      btn.textContent = "Uploading model…";
+      try {
+        await uploadPromise;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = editingIndex >= 0 ? "Save changes" : "Add model";
+      }
+      uploadPromise = null;
+    }
 
     if (pendingFile) {
       entry.file = pendingFile.path;
@@ -221,7 +249,7 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
     $("#model-form").reset();
     pendingFile = null;
     $("#file-path-note").textContent = "Upload a file — the path is filled in automatically.";
-    persist();
+    await persist();
   }
 
   function exportJson() {
@@ -267,19 +295,38 @@ import { idbPut, saveAdminModels, clearAdminModels } from "./model-data.js";
   }
 
   function init() {
-    $("#login-form").addEventListener("submit", (e) => {
+    $("#login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (
-        $("#login-user").value.trim() === ADMIN_USER &&
-        $("#login-pass").value === ADMIN_PASS
-      ) {
+      const user = $("#login-user").value.trim();
+      const pass = $("#login-pass").value;
+      const token = $("#github-token").value.trim();
+
+      if (user !== ADMIN_USER || pass !== ADMIN_PASS) {
+        $("#login-error").textContent = "Incorrect username or password.";
+        $("#login-error").hidden = false;
+        return;
+      }
+
+      const submitBtn = $("#login-form").querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Verifying…";
+      try {
+        const check = await verifyToken(getConfig(), token);
+        if (!check.ok) {
+          $("#login-error").textContent = check.reason;
+          $("#login-error").hidden = false;
+          return;
+        }
         try {
           sessionStorage.setItem(AUTH_KEY, "1");
         } catch (err) {}
+        if (token) setToken(token);
+        $("#login-error").hidden = true;
         showPanel();
         loadFromGitHub();
-      } else {
-        $("#login-error").hidden = false;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Sign in";
       }
     });
 

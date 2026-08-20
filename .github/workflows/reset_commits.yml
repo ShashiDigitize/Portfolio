@@ -1,0 +1,80 @@
+name: Squash Changes After Base Commit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  squash:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main-clean
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main-clean
+
+      - name: Squash commits after base
+        run: |
+          set -e
+
+          BASE="0f0a717f30be12890c37b36db688c86972fed759"
+          CURRENT="$(git rev-parse main-clean)"
+
+          echo "========================================"
+          echo "BASE:    $BASE"
+          echo "CURRENT: $CURRENT"
+          echo "========================================"
+
+          echo ""
+          echo "Commits currently after BASE:"
+          git log --oneline "$BASE..$CURRENT"
+
+          echo ""
+          echo "Number of commits to squash:"
+          git rev-list --count "$BASE..$CURRENT"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Get the exact file tree from the current main-clean HEAD.
+          TREE="$(git rev-parse "$CURRENT^{tree}")"
+
+          echo ""
+          echo "Creating one new commit..."
+          echo "Tree: $TREE"
+
+          # Create a commit whose ONLY parent is BASE.
+          NEW_COMMIT="$(
+            printf '%s\n' 'Portfolio' |
+            git commit-tree "$TREE" -p "$BASE"
+          )"
+
+          echo ""
+          echo "New squashed commit:"
+          git show --no-patch --oneline "$NEW_COMMIT"
+
+          # Move local branch to the new commit.
+          git reset --hard "$NEW_COMMIT"
+
+          echo ""
+          echo "========================================"
+          echo "NEW HISTORY"
+          echo "========================================"
+          git log --oneline --decorate -10
+
+          echo ""
+          echo "Commits remaining after BASE:"
+          git rev-list --count "$BASE..HEAD"
+
+      - name: Force push squashed history to main-clean
+        run: |
+          set -e
+
+          git push origin HEAD:main-clean --force
+
+          echo ""
+          echo "Successfully replaced main-clean history."

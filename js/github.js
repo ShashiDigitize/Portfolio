@@ -1,21 +1,33 @@
 /* GitHub storage — models live in a JSON file on GitHub, model files
-   are uploaded to the same repo. The site reads everything via raw URLs. */
+   are uploaded to the same repo. The site reads everything via raw URLs */
 export const DEFAULT_CONFIG = {
-  owner: "ShashiDigitize",
+  version: 2,
+  owner: "3DArtistZulfekar",
   repo: "Portfolio",
-  branch: "main",
-  jsonPath: "models.json",
-  modelsDir: "models",
+  branch: "main-clean",
+  jsonPath: "data/models.json",
+  modelsDir: "assets/models",
 };
 
 export function getConfig() {
+  let cfg;
   try {
     const saved = JSON.parse(localStorage.getItem("zulf-gh-config") || "null");
-    if (saved && saved.owner && saved.repo) {
-      return Object.assign({}, DEFAULT_CONFIG, saved);
+    if (saved && saved.owner && saved.repo && saved.version === DEFAULT_CONFIG.version) {
+      cfg = Object.assign({}, DEFAULT_CONFIG, saved);
+    } else {
+      cfg = Object.assign({}, DEFAULT_CONFIG);
+      if (saved && saved.owner && saved.repo) {
+        try {
+          localStorage.setItem("zulf-gh-config", JSON.stringify(cfg));
+        } catch (err) {}
+      }
     }
-  } catch (err) {}
-  return Object.assign({}, DEFAULT_CONFIG);
+  } catch (err) {
+    cfg = Object.assign({}, DEFAULT_CONFIG);
+  }
+  if (cfg.modelsDir === "models") cfg.modelsDir = DEFAULT_CONFIG.modelsDir;
+  return cfg;
 }
 
 export function saveConfig(cfg) {
@@ -37,9 +49,9 @@ export function rawUrl(cfg, path) {
 
 export function getToken() {
   try {
-    return localStorage.getItem("zulf-gh-token") || DEFAULT_TOKEN;
+    return localStorage.getItem("zulf-gh-token");
   } catch (err) {
-    return DEFAULT_TOKEN;
+    return null;
   }
 }
 
@@ -51,6 +63,52 @@ export function setToken(token) {
 
 export function hasToken() {
   return !!getToken();
+}
+
+/* verify a GitHub token is valid, can read the repo, and has write scope.
+   classic tokens expose their scopes via the X-OAuth-Scopes header */
+export async function verifyToken(cfg, token) {
+  if (!token) return { ok: false, reason: "No token provided." };
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: "Bearer " + token,
+  };
+  try {
+    const userRes = await fetch("https://api.github.com/user", { headers });
+    if (!userRes.ok) {
+      return { ok: false, reason: "Token rejected by GitHub (HTTP " + userRes.status + ")." };
+    }
+    const scopes = String(userRes.headers.get("X-OAuth-Scopes") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const isClassic = userRes.headers.has("X-OAuth-Scopes");
+
+    const repoRes = await fetch(
+      "https://api.github.com/repos/" + cfg.owner + "/" + cfg.repo,
+      { headers }
+    );
+    if (!repoRes.ok) {
+      return { ok: false, reason: "Token cannot read " + cfg.owner + "/" + cfg.repo + "." };
+    }
+
+    if (isClassic) {
+      const canWrite = scopes.includes("repo") || scopes.includes("public_repo");
+      if (!canWrite) {
+        return {
+          ok: false,
+          reason:
+            "Token is missing the 'repo' scope (needed to upload). Current scopes: " +
+            (scopes.join(", ") || "none") +
+            ". Create a classic token with the 'repo' scope enabled.",
+        };
+      }
+    }
+
+    return { ok: true, scopes };
+  } catch (err) {
+    return { ok: false, reason: "Could not reach GitHub: " + err.message };
+  }
 }const toBase64 = (str) => {
   const bytes = new TextEncoder().encode(str);
   let bin = "";
@@ -107,12 +165,18 @@ export async function putJsonFile(cfg, obj, sha) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error("GitHub write failed: HTTP " + res.status + " — " + text.slice(0, 200));
+    const hint =
+      res.status === 403 || res.status === 404
+        ? " — the token needs the 'repo' scope and write access to " +
+          cfg.owner + "/" + cfg.repo + "."
+        : "";
+    throw new Error("GitHub write failed: HTTP " + res.status + hint + " — " + text.slice(0, 200));
   }
   return res.json();
 }
 
-/* upload a binary model file to the repo; returns its raw URL */
+/* upload a binary model file to the repo; returns its repo path
+   (e.g. assets/models/foo.fbx) matching how models.json stores files */
 export async function putFileBinary(cfg, repoPath, base64, message) {
   const url =
     "https://api.github.com/repos/" + cfg.owner + "/" + cfg.repo +
@@ -135,9 +199,14 @@ export async function putFileBinary(cfg, repoPath, base64, message) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error("GitHub upload failed: HTTP " + res.status + " — " + text.slice(0, 200));
+    const hint =
+      res.status === 403 || res.status === 404
+        ? " — the token needs the 'repo' scope and write access to " +
+          cfg.owner + "/" + cfg.repo + "."
+        : "";
+    throw new Error("GitHub upload failed: HTTP " + res.status + hint + " — " + text.slice(0, 200));
   }
-  return rawUrl(cfg, repoPath);
+  return repoPath;
 }
 
 /* delete a file from the repo */

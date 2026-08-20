@@ -5,6 +5,12 @@
       "type": "Environment",
       "description": "A hand-built stylized island study, presented as a real-time turntable.",
       "file": "assets/models/Noble_Isle.fbx"
+    },
+    {
+      "title": "lili",
+      "type": "fbx",
+      "description": "king khan",
+      "file": "assets/models/lilitab-production.fbx"
     }
   ]
 }

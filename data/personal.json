@@ -227,6 +227,13 @@
         "Product Visualization",
         "Interactive 3D"
       ]
-    }
+    },{
+  "title": "Current Backyard 3D Product Configurator",
+  "type": "Interactive 3D Configurator",
+  "description": "Interactive 3D product visualization experience developed for configurable outdoor products, enabling users to explore product options and visualize their selected configurations in real time.",
+  "url": "https://current-backyard-prod.3kit.com/",
+  "platform": "Threekit",
+  "technologies": ["Threekit", "3D Visualization", "Product Configurator"]
+}
   ]
 }
